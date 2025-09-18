@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Student Mental Wellness — MVP</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial; max-width:960px; margin:24px auto; padding:0 12px; color:#111; }
+    header { display:flex; align-items:center; gap:12px; }
+    h1 { margin:0; font-size:20px; }
+    .card { border:1px solid #ddd; border-radius:8px; padding:12px; margin-top:12px; }
+    textarea { width:100%; min-height:80px; }
+    input[type=text] { width:100%; padding:6px; }
+    button { padding:8px 12px; margin-top:8px; cursor:pointer; }
+    .row { display:flex; gap:8px; }
+    .list-item { border-bottom:1px dashed #eee; padding:8px 0; }
+    .tab { margin-right:8px; padding:6px 8px; cursor:pointer; border-radius:6px; background:#f2f2f2; display:inline-block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Student Mental Wellness — MVP</h1>
+  </header>
+
+  <div class="card">
+    <div>
+      <span class="tab" onclick="show('chat')">Chat</span>
+      <span class="tab" onclick="show('journal')">Journal</span>
+      <span class="tab" onclick="show('mood')">Mood</span>
+      <span class="tab" onclick="show('quiz')">Quiz</span>
+    </div>
+
+    <div id="chat" style="display:none; margin-top:12px;">
+      <h3>Supportive Chat</h3>
+      <div id="chatLog" style="height:200px; overflow:auto; border:1px solid #eee; padding:8px; background:#fafafa;"></div>
+      <textarea id="chatInput" placeholder="Write how you feel..."></textarea>
+      <div class="row">
+        <button onclick="sendChat()">Send</button>
+        <button onclick="clearChat()">Clear</button>
+      </div>
+    </div>
+
+    <div id="journal" style="display:none; margin-top:12px;">
+      <h3>Anonymous Journal</h3>
+      <textarea id="journalText" placeholder="Write an entry..."></textarea>
+      <input id="journalMood" placeholder="Mood (e.g. anxious, calm)"/>
+      <button onclick="saveJournal()">Save entry</button>
+
+      <h4>Recent entries</h4>
+      <div id="journalList"></div>
+    </div>
+
+    <div id="mood" style="display:none; margin-top:12px;">
+      <h3>Mood Tracker</h3>
+      <input id="moodVal" placeholder="Mood (happy/ok/anxious)"/>
+      <input id="moodNote" placeholder="Optional note"/>
+      <button onclick="saveMood()">Save mood</button>
+      <h4>Recent moods</h4>
+      <div id="moodList"></div>
+    </div>
+
+    <div id="quiz" style="display:none; margin-top:12px;">
+      <h3>Quick check (PHQ-9 style)</h3>
+      <p>For each item select 0 (not at all) — 3 (nearly every day)</p>
+      <div id="quizQuestions"></div>
+      <button onclick="submitQuiz()">Submit quiz</button>
+      <div id="quizResult"></div>
+    </div>
+  </div>
+
+<script>
+const API_BASE = "http://127.0.0.1:8000/api";
+
+function show(id){
+  ['chat','journal','mood','quiz'].forEach(x=>document.getElementById(x).style.display='none');
+  document.getElementById(id).style.display='block';
+  if(id==='journal') loadJournal();
+  if(id==='mood') loadMoods();
+  if(id==='quiz') renderQuiz();
+}
+show('chat');
+
+function appendChat(who, text){
+  const div = document.createElement('div');
+  div.innerHTML = `<strong>${who}:</strong> ${text}`;
+  document.getElementById('chatLog').appendChild(div);
+  document.getElementById('chatLog').scrollTop = 1e9;
+}
+
+async function sendChat(){
+  const msg = document.getElementById('chatInput').value.trim();
+  if(!msg) return;
+  appendChat('You', msg);
+  document.getElementById('chatInput').value='';
+  try{
+    const res = await fetch(API_BASE+'/chat', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    const data = await res.json();
+    appendChat('Assistant', data.reply || 'Sorry, no reply.');
+  }catch(e){
+    appendChat('Assistant', 'Error contacting server.');
+  }
+}
+function clearChat(){ document.getElementById('chatLog').innerHTML=''; }
+
+async function saveJournal(){
+  const text = document.getElementById('journalText').value.trim();
+  const mood = document.getElementById('journalMood').value.trim();
+  if(!text) return alert('Write something first.');
+  try{
+    await fetch(API_BASE+'/journal', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text, mood})
+    });
+    document.getElementById('journalText').value='';
+    document.getElementById('journalMood').value='';
+    loadJournal();
+  }catch(e){ alert('Error saving'); }
+}
+
+async function loadJournal(){
+  try{
+    const res = await fetch(API_BASE+'/journal');
+    const entries = await res.json();
+    const el = document.getElementById('journalList');
+    el.innerHTML = '';
+    entries.forEach(e=>{
+      const d = document.createElement('div');
+      d.className='list-item';
+      d.innerHTML = `<div><small>${new Date(e.created_at).toLocaleString()}</small></div><div>${escapeHtml(e.text)}</div><div><em>${e.mood || ''}</em></div>`;
+      el.appendChild(d);
+    });
+  }catch(e){ console.error(e); }
+}
+
+async function saveMood(){
+  const mood = document.getElementById('moodVal').value.trim();
+  const note = document.getElementById('moodNote').value.trim();
+  if(!mood) return alert('Enter mood.');
+  try{
+    await fetch(API_BASE+'/mood', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mood, note})
+    });
+    document.getElementById('moodVal').value=''; document.getElementById('moodNote').value='';
+    loadMoods();
+  }catch(e){ alert('Error saving mood'); }
+}
+
+async function loadMoods(){
+  try{
+    const res = await fetch(API_BASE+'/mood');
+    const items = await res.json();
+    const el = document.getElementById('moodList'); el.innerHTML='';
+    items.forEach(it=>{
+      const d = document.createElement('div'); d.className='list-item';
+      d.innerHTML = `<div><small>${new Date(it.created_at).toLocaleString()}</small></div><div><strong>${it.mood}</strong> - ${escapeHtml(it.note||'')}</div>`;
+      el.appendChild(d);
+    });
+  }catch(e){ console.error(e); }
+}
+
+// Quiz UI
+const QUESTIONS = [
+  "Little interest or pleasure in doing things",
+  "Feeling down, depressed, or hopeless",
+  "Trouble falling or staying asleep, or sleeping too much",
+  "Feeling tired or having little energy",
+  "Poor appetite or overeating",
+  "Feeling bad about yourself — or that you are a failure",
+  "Trouble concentrating on things",
+  "Moving or speaking so slowly that other people could have noticed",
+  "Thoughts that you would be better off dead"
+];
+
+function renderQuiz(){
+  const container = document.getElementById('quizQuestions');
+  container.innerHTML='';
+  QUESTIONS.forEach((q,i)=>{
+    const div = document.createElement('div');
+    div.innerHTML = `<div><strong>${i+1}.</strong> ${q}</div>
+      <div>
+        <label><input type="radio" name="q${i}" value="0" checked> 0</label>
+        <label><input type="radio" name="q${i}" value="1"> 1</label>
+        <label><input type="radio" name="q${i}" value="2"> 2</label>
+        <label><input type="radio" name="q${i}" value="3"> 3</label>
+      </div><hr/>`;
+    container.appendChild(div);
+  });
+}
+
+async function submitQuiz(){
+  const answers = [];
+  for(let i=0;i<QUESTIONS.length;i++){
+    const radios = document.getElementsByName('q'+i);
+    let val = 0;
+    radios.forEach(r=>{ if(r.checked) val = parseInt(r.value); });
+    answers.push(val);
+  }
+  try{
+    const res = await fetch(API_BASE+'/quiz', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({answers})
+    });
+    const data = await res.json();
+    document.getElementById('quizResult').innerHTML = `<div class="card"><strong>Score:</strong> ${data.score} <br/><strong>Interpretation:</strong> ${data.interpretation} <br/><small>${escapeHtml(data.advice)}</small></div>`;
+  }catch(e){ alert('Error submitting quiz'); }
+}
+
+function escapeHtml(s){ return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m])); }
+</script>
+</body>
+</html>
